@@ -1,0 +1,56 @@
+# walcast configuration. ${VAR} and ${VAR:-default} are expanded from the environment.
+
+postgres:                        # go-pq-cdc config, see its README for every option
+  host: 127.0.0.1
+  port: 5432
+  username: cdc_user
+  password: ${PG_PASSWORD}
+  database: app
+  logger:
+    level: info                  # debug|info|warn|error
+  publication:
+    name: walcast_pub
+    createIfNotExists: true
+    operations: [INSERT, UPDATE, DELETE, TRUNCATE]
+    tables:
+      - name: users
+        schema: public
+        replicaIdentity: FULL    # FULL => updates/deletes carry the complete "before" row
+  slot:
+    name: walcast_slot
+    createIfNotExists: true
+    slotActivityCheckerInterval: 3000
+  metric:
+    port: 8081                   # Prometheus metrics
+  # snapshot:                    # optionally emit existing rows before streaming changes
+  #   enabled: true
+  #   mode: initial              # initial | never | snapshot_only
+
+routing:
+  prefix: walcast                # topics/subjects: <prefix>.<schema>.<table>
+  key_columns:                   # message key = these columns (per-row ordering + Kafka partitioning)
+    public.users: [id]           # unlisted tables are keyed by "schema.table"
+
+retry:
+  initial_backoff: 200ms
+  max_backoff: 30s
+
+# Enable any number of sinks; every change goes to all of them.
+sinks:
+  kafka:
+    enabled: true
+    brokers: [localhost:9092]
+    auto_create_topics: true
+    compression: lz4             # none|gzip|snappy|lz4|zstd
+    # tls: true
+    # sasl: { mechanism: scram-sha-512, username: u, password: ${KAFKA_PASSWORD} }
+
+  nats:
+    enabled: false
+    url: nats://localhost:4222
+    # creds_file: /etc/nats/user.creds   # or user/password, or token
+    stream:
+      name: WALCAST
+      create: true               # creates stream for "<prefix>.>" if missing; never modifies an existing one
+      storage: file              # file|memory
+      replicas: 1

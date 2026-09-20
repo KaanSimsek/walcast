@@ -1,0 +1,48 @@
+# walcast
+
+Streams PostgreSQL changes (logical replication, via [go-pq-cdc](https://github.com/Trendyol/go-pq-cdc)) to the message brokers you enable in config. Kafka and NATS JetStream are built in; adding another broker is one package.
+
+```
+Postgres WAL ─▶ go-pq-cdc ─▶ pipeline ─┬─▶ kafka
+                (slot+publication)      ├─▶ nats jetstream
+                                        └─▶ (redis, rabbitmq, ... later)
+```
+
+## Run
+
+```sh
+cp config.example.yaml config.yaml   # edit; enable the sinks you want
+go run ./cmd/walcast -config config.yaml
+```
+
+Postgres needs `wal_level=logical` and a role with `REPLICATION` (plus rights to create the publication/slot, or create them yourself).
+
+## Event format
+
+Every sink receives the same JSON envelope:
+
+```json
+{"id":"0/175A220/public.users/update","op":"update","schema":"public","table":"users",
+ "lsn":"0/175A220","ts":"2026-09-20T12:13:28Z","before":{...},"after":{...}}
+```
+
+`op` is `insert | update | delete | truncate | snapshot`. `before` on updates is the full old row only with `REPLICA IDENTITY FULL`.
+
+| | destination | key / dedup |
+|---|---|---|
+| Kafka | topic `<prefix>.<schema>.<table>` | record key = `routing.key_columns` values, else `schema.table` |
+| NATS | subject `<prefix>.<schema>.<table>.<op>` | `Nats-Msg-Id` = event `id` (JetStream dedupes redelivery) |
+
+## Delivery guarantees
+
+At-least-once, in WAL order. The WAL position is acknowledged only after **every enabled sink** has durably accepted the change. If a sink is down, walcast retries with backoff and stops advancing the slot (Postgres retains WAL meanwhile, so alert on slot lag). After a crash, recent changes may be redelivered; dedupe on `id`.
+
+With several sinks enabled, a slow or failing one delays all of them.
+
+## Adding a broker
+
+1. `internal/sink/<name>/` implementing `sink.Sink`, with `func init() { sink.Register("<name>", New) }`. Decode its own config section via `sink.Config.Decode`.
+2. Blank-import it in `cmd/walcast/main.go`.
+3. Add a `sinks.<name>` section with `enabled: true`.
+
+Nothing in core config or the pipeline changes.
