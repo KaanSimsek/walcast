@@ -1,11 +1,12 @@
 # walcast
 
-Streams PostgreSQL changes (logical replication, via [go-pq-cdc](https://github.com/Trendyol/go-pq-cdc)) to the message brokers you enable in config. Kafka and NATS JetStream are built in; adding another broker is one package.
+Streams PostgreSQL changes (logical replication, via [go-pq-cdc](https://github.com/Trendyol/go-pq-cdc)) to the message brokers you enable in config. Kafka, NATS JetStream and RabbitMQ are built in; adding another broker is one package.
 
 ```
 Postgres WAL ─▶ go-pq-cdc ─▶ pipeline ─┬─▶ kafka
                 (slot+publication)      ├─▶ nats jetstream
-                                        └─▶ (redis, rabbitmq, ... later)
+                                        ├─▶ rabbitmq
+                                        └─▶ (redis, ... later)
 ```
 
 ## Run
@@ -32,6 +33,9 @@ Every sink receives the same JSON envelope:
 |---|---|---|
 | Kafka | topic `<prefix>.<schema>.<table>` | record key = `routing.key_columns` values, else `schema.table` |
 | NATS | subject `<prefix>.<schema>.<table>.<op>` | `Nats-Msg-Id` = event `id` (JetStream dedupes redelivery) |
+| RabbitMQ | exchange, routing key `<prefix>.<schema>.<table>.<op>` | `MessageId` = event `id`; `Type`/`op` header = operation |
+
+RabbitMQ publishes are persistent and wait for publisher confirms. An unroutable message (no queue bound to the exchange) is returned and treated as a failure, so the WAL stalls instead of losing the change. The exchange is declared on startup by default; use `exchange.declare: false` if it is managed elsewhere.
 
 ## Delivery guarantees
 

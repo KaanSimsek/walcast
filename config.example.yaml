@@ -54,3 +54,13 @@ sinks:
       create: true               # creates stream for "<prefix>.>" if missing; never modifies an existing one
       storage: file              # file|memory
       replicas: 1
+
+  rabbitmq:
+    enabled: false
+    url: amqp://guest:guest@localhost:5672/   # amqps:// for TLS
+    exchange:
+      name: walcast              # defaults to routing.prefix
+      type: topic                # direct|fanout|topic|headers
+      durable: true
+      declare: true              # create the exchange if missing; mismatched settings are an error
+    # publish_timeout: 10s
