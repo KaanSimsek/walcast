@@ -5,6 +5,7 @@ go 1.26.3
 require (
 	github.com/Trendyol/go-pq-cdc v1.11.14
 	github.com/nats-io/nats.go v1.54.0
+	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/twmb/franz-go v1.22.0
 	gopkg.in/yaml.v3 v3.0.1
 )

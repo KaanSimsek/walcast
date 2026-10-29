@@ -19,6 +19,7 @@ import (
 
 	_ "walcast/internal/sink/kafka"
 	_ "walcast/internal/sink/nats"
+	_ "walcast/internal/sink/rabbitmq"
 )
 
 func main() {
