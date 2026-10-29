@@ -45,7 +45,7 @@ With several sinks enabled, a slow or failing one delays all of them.
 
 ## Adding a broker
 
-1. `internal/sink/<name>/` implementing `sink.Sink`, with `func init() { sink.Register("<name>", New) }`. Decode its own config section via `sink.Config.Decode`.
+1. `internal/sink/<name>/` with `config.go` (config struct, defaults and validation) and `<name>.go` implementing `sink.Sink`, with `func init() { sink.Register("<name>", New) }`. Decode its own config section via `sink.Config.Decode`.
 2. Blank-import it in `cmd/walcast/main.go`.
 3. Add a `sinks.<name>` section with `enabled: true`.
 

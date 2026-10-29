@@ -1,7 +1,7 @@
 // Package sink defines the contract every message broker backend implements,
 // plus a registry so backends can be selected by name from config.
 //
-// To add a backend (redis, rabbitmq, ...): create a sub-package, implement Sink,
+// To add a backend (redis, ...): create a sub-package, implement Sink,
 // call Register from its init(), and blank-import it in cmd/walcast.
 package sink
 
@@ -16,7 +16,8 @@ import (
 // Message is one encoded event, routed and ready to hand to a broker.
 type Message struct {
 	// Topic is the logical destination: "<prefix>.<schema>.<table>".
-	// Kafka uses it as the topic name; NATS appends the op to form the subject.
+	// Kafka uses it as the topic name; NATS and RabbitMQ append the op to form
+	// the subject/routing key.
 	Topic string
 	Op    string
 	// Key drives partitioning/ordering: all changes to one row share a key.

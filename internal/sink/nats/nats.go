@@ -18,25 +18,6 @@ import (
 
 func init() { sink.Register("nats", New) }
 
-type Config struct {
-	URL       string `yaml:"url"`
-	CredsFile string `yaml:"creds_file"`
-	User      string `yaml:"user"`
-	Password  string `yaml:"password"`
-	Token     string `yaml:"token"`
-	// PublishTimeout bounds one publish+ack round trip (default 10s).
-	PublishTimeout time.Duration `yaml:"publish_timeout"`
-	Stream         struct {
-		Name string `yaml:"name"`
-		// Create makes the stream (subjects "<prefix>.>") if it is missing. An
-		// existing stream is never modified. Without it the stream must already
-		// exist and cover the subjects, otherwise publishes fail.
-		Create   bool   `yaml:"create"`
-		Storage  string `yaml:"storage"` // file (default) | memory
-		Replicas int    `yaml:"replicas"`
-	} `yaml:"stream"`
-}
-
 type Sink struct {
 	nc      *natsgo.Conn
 	js      jetstream.JetStream
@@ -48,14 +29,8 @@ func New(ctx context.Context, sc sink.Config) (sink.Sink, error) {
 	if err := sc.Decode(&cfg); err != nil {
 		return nil, err
 	}
-	if cfg.URL == "" {
-		cfg.URL = natsgo.DefaultURL
-	}
-	if cfg.Stream.Name == "" {
-		return nil, errors.New("nats: stream.name is required")
-	}
-	if cfg.PublishTimeout <= 0 {
-		cfg.PublishTimeout = 10 * time.Second
+	if err := cfg.withDefaults(); err != nil {
+		return nil, err
 	}
 
 	opts := []natsgo.Option{
@@ -105,24 +80,14 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config, prefi
 	if !cfg.Stream.Create {
 		return fmt.Errorf("nats: stream %q does not exist (set sinks.nats.stream.create: true, or create it for subjects %q)", name, prefix+".>")
 	}
-
-	storage := jetstream.FileStorage
-	switch cfg.Stream.Storage {
-	case "", "file":
-	case "memory":
-		storage = jetstream.MemoryStorage
-	default:
-		return fmt.Errorf("nats: unknown stream.storage %q", cfg.Stream.Storage)
-	}
-	if _, err := js.CreateStream(ctx, jetstream.StreamConfig{
-		Name:     name,
-		Subjects: []string{prefix + ".>"},
-		Storage:  storage,
-		Replicas: max(cfg.Stream.Replicas, 1),
-	}); err != nil {
+	if _, err := js.CreateStream(ctx, cfg.streamConfig(prefix)); err != nil {
 		return fmt.Errorf("nats: create stream %q: %w", name, err)
 	}
 	return nil
+}
+
+func subject(m *sink.Message) string {
+	return m.Topic + "." + m.Op
 }
 
 func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
@@ -133,9 +98,9 @@ func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
 	if m.ID != "" {
 		opts = append(opts, jetstream.WithMsgID(m.ID)) // JetStream drops redelivered duplicates in its dedupe window
 	}
-	subject := m.Topic + "." + m.Op
-	if _, err := s.js.Publish(ctx, subject, m.Value, opts...); err != nil {
-		return fmt.Errorf("nats publish to %s: %w", subject, err)
+	subj := subject(m)
+	if _, err := s.js.Publish(ctx, subj, m.Value, opts...); err != nil {
+		return fmt.Errorf("nats publish to %s: %w", subj, err)
 	}
 	return nil
 }

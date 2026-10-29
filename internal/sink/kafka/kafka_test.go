@@ -5,19 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"walcast/internal/sink"
+	"walcast/internal/sink/sinktest"
 )
-
-func decodeFn(t *testing.T, doc string) func(any) error {
-	t.Helper()
-	var n yaml.Node
-	if err := yaml.Unmarshal([]byte(doc), &n); err != nil {
-		t.Fatal(err)
-	}
-	return func(v any) error { return n.Decode(v) }
-}
 
 func TestOptionsValidation(t *testing.T) {
 	cases := []struct {
@@ -30,12 +20,12 @@ func TestOptionsValidation(t *testing.T) {
 	}
 	for _, c := range cases {
 		var cfg Config
-		if err := decodeFn(t, c.cfg)(&cfg); err != nil {
+		if err := sinktest.Decode(t, c.cfg)(&cfg); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		var err error
 		if len(cfg.Brokers) == 0 {
-			_, err = New(context.Background(), sink.Config{Decode: decodeFn(t, c.cfg)})
+			_, err = New(context.Background(), sink.Config{Decode: sinktest.Decode(t, c.cfg)})
 		} else {
 			_, err = cfg.options()
 		}
