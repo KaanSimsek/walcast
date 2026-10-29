@@ -102,14 +102,38 @@ go-pq-cdc insert/update/delete counters if the workload is bursty.
 
 ## Health endpoints
 
+The go-pq-cdc metrics server exposes:
+
 - `GET /status` returns `OK` (liveness).
 - `GET /slot` returns replication slot information.
 - `GET /metrics` is the Prometheus endpoint.
 
-There is no HTTP readiness endpoint. Use the `walcast_ready` metric for
-readiness; it becomes `1` after the connector reaches its ready state and goes
-back to `0` on shutdown. It intentionally does not flap when a sink is failing,
-because restarting the process would not fix a broker outage.
+For HTTP readiness probes, set `observability.health_port`. This starts a second,
+small server because go-pq-cdc owns the metrics listener:
+
+```yaml
+observability:
+  health_port: 8082
+```
+
+It exposes:
+
+- `GET /healthz`: always `200` while the process is running.
+- `GET /readyz`: `200` when the connector is ready, `503` before that and during
+  shutdown.
+
+Readiness follows `walcast_ready`. It intentionally does not flap when a sink is
+failing, because restarting the process would not fix a broker outage; use
+`walcast_sink_up` and the publish metrics for that.
+
+Example Kubernetes probes:
+
+```yaml
+livenessProbe:
+  httpGet: {path: /healthz, port: 8082}
+readinessProbe:
+  httpGet: {path: /readyz, port: 8082}
+```
 
 ## Logs
 

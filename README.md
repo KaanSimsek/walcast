@@ -41,7 +41,7 @@ Messages also carry `op`, `id` and `lsn` headers where the broker supports them,
 
 ## Observability
 
-Metrics are served by go-pq-cdc at `postgres.metric.port/metrics` (default `8080`). walcast registers its collectors there, so there is a single Prometheus target; `/status` is liveness and `/slot` shows replication slot state.
+Metrics are served by go-pq-cdc at `postgres.metric.port/metrics` (default `8080`). walcast registers its collectors there, so there is a single Prometheus target; `/status` is liveness and `/slot` shows replication slot state. Set `observability.health_port` to expose `/healthz` and `/readyz` on a separate port for HTTP probes.
 
 The `walcast_*` metrics cover publish attempts, latency, retries, sink health, event lag, acknowledgements and readiness. See [docs/observability.md](docs/observability.md) for the metric catalog, PromQL examples and alert rules.
 

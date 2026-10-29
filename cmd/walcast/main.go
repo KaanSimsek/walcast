@@ -14,6 +14,7 @@ import (
 	cdc "github.com/Trendyol/go-pq-cdc"
 
 	"walcast/internal/config"
+	"walcast/internal/health"
 	"walcast/internal/metrics"
 	"walcast/internal/pipeline"
 	"walcast/internal/sink"
@@ -74,6 +75,19 @@ func run(configPath string) error {
 		metricPort = 8080
 	}
 	log.Info("walcast starting", "sinks", names, "prefix", cfg.Routing.Prefix, "metrics_port", metricPort)
+
+	if cfg.Observability.HealthPort > 0 {
+		healthSrv, err := health.New(cfg.Observability.HealthPort, m.Ready, log)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := healthSrv.Close(); err != nil {
+				log.Warn("closing health server", "error", err)
+			}
+		}()
+		log.Info("health server listening", "port", cfg.Observability.HealthPort)
+	}
 
 	connector, err := cdc.NewConnector(ctx, cfg.Postgres, pl.Handle)
 	if err != nil {

@@ -37,6 +37,7 @@ retry:
 
 observability:
   log_format: json               # json (default) | text; applies to walcast and go-pq-cdc
+  # health_port: 8082            # separate /healthz + /readyz server; 0 disables
 
 # Enable any number of sinks; every change goes to all of them.
 sinks:

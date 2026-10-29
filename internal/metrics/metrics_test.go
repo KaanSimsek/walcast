@@ -58,6 +58,9 @@ func TestMetricsRecordAckAndLag(t *testing.T) {
 	if got := testutil.ToFloat64(m.ready); got != 1 {
 		t.Errorf("ready = %v, want 1", got)
 	}
+	if !m.Ready() {
+		t.Error("Ready() = false, want true")
+	}
 	if got := testutil.CollectAndCount(m.eventLag); got != 1 {
 		t.Errorf("event lag series = %d, want 1", got)
 	}
@@ -65,6 +68,9 @@ func TestMetricsRecordAckAndLag(t *testing.T) {
 	m.SetReady(false)
 	if got := testutil.ToFloat64(m.ready); got != 0 {
 		t.Errorf("ready = %v after shutdown, want 0", got)
+	}
+	if m.Ready() {
+		t.Error("Ready() = true after shutdown")
 	}
 }
 

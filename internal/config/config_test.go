@@ -70,6 +70,27 @@ func TestParseLogFormat(t *testing.T) {
 	}
 }
 
+func TestParseHealthPort(t *testing.T) {
+	t.Setenv("PW", "x")
+	cfg, err := Parse([]byte(strings.Replace(minimal, "sinks:", "observability: {health_port: 8082}\nsinks:", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Observability.HealthPort != 8082 {
+		t.Errorf("health port = %d, want 8082", cfg.Observability.HealthPort)
+	}
+
+	bad := strings.Replace(minimal, "sinks:", "observability: {health_port: 70000}\nsinks:", 1)
+	if _, err := Parse([]byte(bad)); err == nil || !strings.Contains(err.Error(), "health_port") {
+		t.Fatalf("err = %v, want health_port error", err)
+	}
+
+	conflict := strings.Replace(minimal, "sinks:", "observability: {health_port: 8080}\nsinks:", 1)
+	if _, err := Parse([]byte(conflict)); err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Fatalf("err = %v, want port conflict error", err)
+	}
+}
+
 func TestExpandEnv(t *testing.T) {
 	t.Setenv("SET", "v")
 	got, err := expandEnv("${SET} ${UNSET_X:-def} ${UNSET_Y:-} $plain")

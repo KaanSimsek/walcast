@@ -46,6 +46,8 @@ type Retry struct {
 type Observability struct {
 	// LogFormat is json (default) or text and applies to walcast and go-pq-cdc.
 	LogFormat string `yaml:"log_format"`
+	// HealthPort enables /healthz and /readyz on a separate port when non-zero.
+	HealthPort int `yaml:"health_port"`
 }
 
 // EnabledSinks returns the names of sinks with `enabled: true`, sorted by name
@@ -106,6 +108,17 @@ func Parse(raw []byte) (*Config, error) {
 	case "json", "text":
 	default:
 		return nil, fmt.Errorf("observability.log_format must be json or text, got %q", cfg.Observability.LogFormat)
+	}
+	if p := cfg.Observability.HealthPort; p < 0 || p > 65535 {
+		return nil, fmt.Errorf("observability.health_port must be between 0 and 65535, got %d", p)
+	} else if p != 0 {
+		metricPort := cfg.Postgres.Metric.Port
+		if metricPort == 0 {
+			metricPort = 8080
+		}
+		if p == metricPort {
+			return nil, fmt.Errorf("observability.health_port must differ from postgres.metric.port (%d)", metricPort)
+		}
 	}
 
 	names, err := cfg.EnabledSinks()

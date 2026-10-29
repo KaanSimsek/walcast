@@ -8,6 +8,7 @@ package metrics
 import (
 	"runtime"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -37,6 +38,7 @@ type Metrics struct {
 	lastSuccess     *prometheus.GaugeVec
 	pipelineErrors  *prometheus.CounterVec
 	ready           prometheus.Gauge
+	readyState      atomic.Bool
 	buildInfo       prometheus.Gauge
 	process         prometheus.Collector
 }
@@ -187,9 +189,15 @@ func (m *Metrics) PipelineError(stage string) {
 }
 
 func (m *Metrics) SetReady(ready bool) {
+	m.readyState.Store(ready)
 	if ready {
 		m.ready.Set(1)
 		return
 	}
 	m.ready.Set(0)
+}
+
+// Ready reports the current readiness state without going through Prometheus.
+func (m *Metrics) Ready() bool {
+	return m.readyState.Load()
 }
