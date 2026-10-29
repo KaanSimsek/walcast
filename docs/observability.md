@@ -108,12 +108,13 @@ The go-pq-cdc metrics server exposes:
 - `GET /slot` returns replication slot information.
 - `GET /metrics` is the Prometheus endpoint.
 
-For HTTP readiness probes, set `observability.health_port`. This starts a second,
-small server because go-pq-cdc owns the metrics listener:
+The health server is enabled by default on port `8081`. It runs on a second,
+small server because go-pq-cdc owns the metrics listener. Set `health_port` to
+change the port or `0` to disable it; it must differ from `postgres.metric.port`.
 
 ```yaml
 observability:
-  health_port: 8082
+  health_port: 8081
 ```
 
 It exposes:
@@ -130,9 +131,9 @@ Example Kubernetes probes:
 
 ```yaml
 livenessProbe:
-  httpGet: {path: /healthz, port: 8082}
+  httpGet: {path: /healthz, port: 8081}
 readinessProbe:
-  httpGet: {path: /readyz, port: 8082}
+  httpGet: {path: /readyz, port: 8081}
 ```
 
 ## Logs

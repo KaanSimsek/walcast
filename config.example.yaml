@@ -21,7 +21,7 @@ postgres:                        # go-pq-cdc config, see its README for every op
     createIfNotExists: true
     slotActivityCheckerInterval: 3000
   metric:
-    port: 8081                   # Prometheus metrics
+    port: 8080                   # Prometheus metrics
   # snapshot:                    # optionally emit existing rows before streaming changes
   #   enabled: true
   #   mode: initial              # initial | never | snapshot_only
@@ -37,7 +37,7 @@ retry:
 
 observability:
   log_format: json               # json (default) | text; applies to walcast and go-pq-cdc
-  # health_port: 8082            # separate /healthz + /readyz server; 0 disables
+  health_port: 8081              # separate /healthz + /readyz server; 0 disables
 
 # Enable any number of sinks; every change goes to all of them.
 sinks:

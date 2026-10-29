@@ -72,12 +72,28 @@ func TestParseLogFormat(t *testing.T) {
 
 func TestParseHealthPort(t *testing.T) {
 	t.Setenv("PW", "x")
-	cfg, err := Parse([]byte(strings.Replace(minimal, "sinks:", "observability: {health_port: 8082}\nsinks:", 1)))
+	cfg, err := Parse([]byte(minimal))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Observability.HealthPort != 8082 {
-		t.Errorf("health port = %d, want 8082", cfg.Observability.HealthPort)
+	if got := cfg.Observability.HealthPortValue(); got != DefaultHealthPort {
+		t.Errorf("default health port = %d, want %d", got, DefaultHealthPort)
+	}
+
+	cfg, err = Parse([]byte(strings.Replace(minimal, "sinks:", "observability: {health_port: 8082}\nsinks:", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Observability.HealthPortValue(); got != 8082 {
+		t.Errorf("health port = %d, want 8082", got)
+	}
+
+	cfg, err = Parse([]byte(strings.Replace(minimal, "sinks:", "observability: {health_port: 0}\nsinks:", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Observability.HealthPortValue(); got != 0 {
+		t.Errorf("disabled health port = %d, want 0", got)
 	}
 
 	bad := strings.Replace(minimal, "sinks:", "observability: {health_port: 70000}\nsinks:", 1)
@@ -88,6 +104,11 @@ func TestParseHealthPort(t *testing.T) {
 	conflict := strings.Replace(minimal, "sinks:", "observability: {health_port: 8080}\nsinks:", 1)
 	if _, err := Parse([]byte(conflict)); err == nil || !strings.Contains(err.Error(), "must differ") {
 		t.Fatalf("err = %v, want port conflict error", err)
+	}
+
+	withMetric := strings.Replace(minimal, "  host: h", "  host: h\n  metric: {port: 8081}", 1)
+	if _, err := Parse([]byte(withMetric)); err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Fatalf("default health port should conflict with metric port: err = %v", err)
 	}
 }
 

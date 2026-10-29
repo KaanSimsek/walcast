@@ -76,8 +76,8 @@ func run(configPath string) error {
 	}
 	log.Info("walcast starting", "sinks", names, "prefix", cfg.Routing.Prefix, "metrics_port", metricPort)
 
-	if cfg.Observability.HealthPort > 0 {
-		healthSrv, err := health.New(cfg.Observability.HealthPort, m.Ready, log)
+	if healthPort := cfg.Observability.HealthPortValue(); healthPort > 0 {
+		healthSrv, err := health.New(healthPort, m.Ready, log)
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func run(configPath string) error {
 				log.Warn("closing health server", "error", err)
 			}
 		}()
-		log.Info("health server listening", "port", cfg.Observability.HealthPort)
+		log.Info("health server listening", "port", healthPort)
 	}
 
 	connector, err := cdc.NewConnector(ctx, cfg.Postgres, pl.Handle)

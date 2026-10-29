@@ -43,11 +43,23 @@ type Retry struct {
 	MaxBackoff     time.Duration `yaml:"max_backoff"`
 }
 
+// DefaultHealthPort is where /healthz and /readyz are served unless configured
+// otherwise. Set health_port to 0 to disable the server.
+const DefaultHealthPort = 8081
+
 type Observability struct {
 	// LogFormat is json (default) or text and applies to walcast and go-pq-cdc.
 	LogFormat string `yaml:"log_format"`
-	// HealthPort enables /healthz and /readyz on a separate port when non-zero.
-	HealthPort int `yaml:"health_port"`
+	// HealthPort enables /healthz and /readyz on a separate port. Nil means the
+	// default (8081); 0 disables the server.
+	HealthPort *int `yaml:"health_port"`
+}
+
+func (o Observability) HealthPortValue() int {
+	if o.HealthPort == nil {
+		return DefaultHealthPort
+	}
+	return *o.HealthPort
 }
 
 // EnabledSinks returns the names of sinks with `enabled: true`, sorted by name
@@ -109,14 +121,16 @@ func Parse(raw []byte) (*Config, error) {
 	default:
 		return nil, fmt.Errorf("observability.log_format must be json or text, got %q", cfg.Observability.LogFormat)
 	}
-	if p := cfg.Observability.HealthPort; p < 0 || p > 65535 {
-		return nil, fmt.Errorf("observability.health_port must be between 0 and 65535, got %d", p)
-	} else if p != 0 {
+	healthPort := cfg.Observability.HealthPortValue()
+	if healthPort < 0 || healthPort > 65535 {
+		return nil, fmt.Errorf("observability.health_port must be between 0 and 65535, got %d", healthPort)
+	}
+	if healthPort != 0 {
 		metricPort := cfg.Postgres.Metric.Port
 		if metricPort == 0 {
 			metricPort = 8080
 		}
-		if p == metricPort {
+		if healthPort == metricPort {
 			return nil, fmt.Errorf("observability.health_port must differ from postgres.metric.port (%d)", metricPort)
 		}
 	}
