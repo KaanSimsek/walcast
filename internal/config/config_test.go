@@ -45,6 +45,31 @@ func TestParseRejectsNoEnabledSink(t *testing.T) {
 	}
 }
 
+func TestParseLogFormat(t *testing.T) {
+	t.Setenv("PW", "x")
+	cfg, err := Parse([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Observability.LogFormat != "json" {
+		t.Errorf("default log format = %q, want json", cfg.Observability.LogFormat)
+	}
+
+	withText := strings.Replace(minimal, "sinks:", "observability: {log_format: text}\nsinks:", 1)
+	cfg, err = Parse([]byte(withText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Observability.LogFormat != "text" {
+		t.Errorf("log format = %q, want text", cfg.Observability.LogFormat)
+	}
+
+	bad := strings.Replace(minimal, "sinks:", "observability: {log_format: yaml}\nsinks:", 1)
+	if _, err := Parse([]byte(bad)); err == nil || !strings.Contains(err.Error(), "log_format") {
+		t.Fatalf("err = %v, want log_format error", err)
+	}
+}
+
 func TestExpandEnv(t *testing.T) {
 	t.Setenv("SET", "v")
 	got, err := expandEnv("${SET} ${UNSET_X:-def} ${UNSET_Y:-} $plain")

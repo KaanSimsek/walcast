@@ -17,9 +17,10 @@ import (
 type Config struct {
 	// Postgres is go-pq-cdc's config verbatim (connection, publication, slot,
 	// snapshot, heartbeat, metrics), so every upstream option works unchanged.
-	Postgres cdcconfig.Config `yaml:"postgres"`
-	Routing  Routing          `yaml:"routing"`
-	Retry    Retry            `yaml:"retry"`
+	Postgres      cdcconfig.Config `yaml:"postgres"`
+	Routing       Routing          `yaml:"routing"`
+	Retry         Retry            `yaml:"retry"`
+	Observability Observability    `yaml:"observability"`
 	// Sinks maps a sink name (kafka, nats, ...) to its raw section. Each
 	// backend decodes its own section, so core config never changes when a
 	// backend is added.
@@ -40,6 +41,11 @@ type Routing struct {
 type Retry struct {
 	InitialBackoff time.Duration `yaml:"initial_backoff"`
 	MaxBackoff     time.Duration `yaml:"max_backoff"`
+}
+
+type Observability struct {
+	// LogFormat is json (default) or text and applies to walcast and go-pq-cdc.
+	LogFormat string `yaml:"log_format"`
 }
 
 // EnabledSinks returns the names of sinks with `enabled: true`, sorted by name
@@ -93,6 +99,13 @@ func Parse(raw []byte) (*Config, error) {
 	}
 	if cfg.Retry.MaxBackoff < cfg.Retry.InitialBackoff {
 		return nil, errors.New("retry.max_backoff must be >= retry.initial_backoff")
+	}
+	switch cfg.Observability.LogFormat = strings.ToLower(cfg.Observability.LogFormat); cfg.Observability.LogFormat {
+	case "":
+		cfg.Observability.LogFormat = "json"
+	case "json", "text":
+	default:
+		return nil, fmt.Errorf("observability.log_format must be json or text, got %q", cfg.Observability.LogFormat)
 	}
 
 	names, err := cfg.EnabledSinks()

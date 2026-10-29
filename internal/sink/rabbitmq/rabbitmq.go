@@ -152,13 +152,20 @@ func routingKey(m *sink.Message) string {
 }
 
 func publishing(m *sink.Message) amqp.Publishing {
+	headers := amqp.Table{"op": m.Op, "key": string(m.Key)}
+	if m.ID != "" {
+		headers["id"] = m.ID
+	}
+	if m.LSN != "" {
+		headers["lsn"] = m.LSN
+	}
 	return amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
 		MessageId:    m.ID,
 		Type:         m.Op,
 		Timestamp:    time.Now(),
-		Headers:      amqp.Table{"op": m.Op, "key": string(m.Key)},
+		Headers:      headers,
 		Body:         m.Value,
 	}
 }

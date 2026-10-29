@@ -37,13 +37,24 @@ func New(ctx context.Context, sc sink.Config) (sink.Sink, error) {
 	return &Sink{client: client}, nil
 }
 
-func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
+func record(m *sink.Message) *kgo.Record {
 	rec := &kgo.Record{
 		Topic:   m.Topic,
 		Key:     m.Key,
 		Value:   m.Value,
 		Headers: []kgo.RecordHeader{{Key: "op", Value: []byte(m.Op)}},
 	}
+	if m.ID != "" {
+		rec.Headers = append(rec.Headers, kgo.RecordHeader{Key: "id", Value: []byte(m.ID)})
+	}
+	if m.LSN != "" {
+		rec.Headers = append(rec.Headers, kgo.RecordHeader{Key: "lsn", Value: []byte(m.LSN)})
+	}
+	return rec
+}
+
+func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
+	rec := record(m)
 	if err := s.client.ProduceSync(ctx, rec).FirstErr(); err != nil {
 		return fmt.Errorf("kafka produce to %s: %w", m.Topic, err)
 	}

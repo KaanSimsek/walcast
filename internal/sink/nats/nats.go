@@ -13,6 +13,7 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"walcast/internal/redact"
 	"walcast/internal/sink"
 )
 
@@ -40,7 +41,7 @@ func New(ctx context.Context, sc sink.Config) (sink.Sink, error) {
 			sc.Log.Warn("nats disconnected", "error", err)
 		}),
 		natsgo.ReconnectHandler(func(c *natsgo.Conn) {
-			sc.Log.Info("nats reconnected", "url", c.ConnectedUrl())
+			sc.Log.Info("nats reconnected", "url", redact.URL(c.ConnectedUrl()))
 		}),
 	}
 	switch {
@@ -54,7 +55,7 @@ func New(ctx context.Context, sc sink.Config) (sink.Sink, error) {
 
 	nc, err := natsgo.Connect(cfg.URL, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("nats: connect %s: %w", cfg.URL, err)
+		return nil, fmt.Errorf("nats: connect %s: %w", redact.URL(cfg.URL), err)
 	}
 	js, err := jetstream.New(nc)
 	if err != nil {
@@ -90,6 +91,18 @@ func subject(m *sink.Message) string {
 	return m.Topic + "." + m.Op
 }
 
+func message(m *sink.Message) *natsgo.Msg {
+	msg := &natsgo.Msg{Subject: subject(m), Data: m.Value, Header: natsgo.Header{}}
+	msg.Header.Set("op", m.Op)
+	if m.ID != "" {
+		msg.Header.Set("id", m.ID)
+	}
+	if m.LSN != "" {
+		msg.Header.Set("lsn", m.LSN)
+	}
+	return msg
+}
+
 func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
@@ -98,9 +111,9 @@ func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
 	if m.ID != "" {
 		opts = append(opts, jetstream.WithMsgID(m.ID)) // JetStream drops redelivered duplicates in its dedupe window
 	}
-	subj := subject(m)
-	if _, err := s.js.Publish(ctx, subj, m.Value, opts...); err != nil {
-		return fmt.Errorf("nats publish to %s: %w", subj, err)
+	msg := message(m)
+	if _, err := s.js.PublishMsg(ctx, msg, opts...); err != nil {
+		return fmt.Errorf("nats publish to %s: %w", msg.Subject, err)
 	}
 	return nil
 }

@@ -15,16 +15,18 @@ import (
 
 	"walcast/internal/config"
 	"walcast/internal/event"
+	"walcast/internal/metrics"
 	"walcast/internal/sink"
 )
 
 type Pipeline struct {
-	ctx    context.Context
-	fail   context.CancelCauseFunc
-	router *Router
-	sinks  []namedSink
-	retry  config.Retry
-	log    *slog.Logger
+	ctx     context.Context
+	fail    context.CancelCauseFunc
+	router  *Router
+	sinks   []namedSink
+	retry   config.Retry
+	log     *slog.Logger
+	metrics *metrics.Metrics
 }
 
 type namedSink struct {
@@ -36,12 +38,16 @@ type namedSink struct {
 // aborts any in-progress retry wait. fail is invoked with the cause when a
 // change can never be published (e.g. it cannot be encoded); the change is
 // left unacknowledged and the caller is expected to shut down.
-func New(ctx context.Context, fail context.CancelCauseFunc, router *Router, retry config.Retry, log *slog.Logger) *Pipeline {
-	return &Pipeline{ctx: ctx, fail: fail, router: router, retry: retry, log: log}
+func New(ctx context.Context, fail context.CancelCauseFunc, router *Router, retry config.Retry, log *slog.Logger, m *metrics.Metrics) *Pipeline {
+	if m == nil {
+		m = metrics.New()
+	}
+	return &Pipeline{ctx: ctx, fail: fail, router: router, retry: retry, log: log, metrics: m}
 }
 
 func (p *Pipeline) AddSink(name string, s sink.Sink) {
 	p.sinks = append(p.sinks, namedSink{name, s})
+	p.metrics.SinkUp(name)
 }
 
 // Handle is the go-pq-cdc listener. go-pq-cdc calls it sequentially in WAL
@@ -49,9 +55,11 @@ func (p *Pipeline) AddSink(name string, s sink.Sink) {
 // (which also applies backpressure to the replication stream) and returns
 // without acking only when shutting down.
 func (p *Pipeline) Handle(lctx *replication.ListenerContext) {
-	for _, e := range event.FromReplication(lctx.Message) {
+	events := event.FromReplication(lctx.Message)
+	for _, e := range events {
 		msg, err := p.router.Route(e)
 		if err != nil {
+			p.metrics.PipelineError(metrics.StageEncode)
 			p.fail(err)
 			return
 		}
@@ -60,7 +68,16 @@ func (p *Pipeline) Handle(lctx *replication.ListenerContext) {
 		}
 	}
 	if err := lctx.Ack(); err != nil {
+		p.metrics.Ack(metrics.ResultError)
+		p.metrics.PipelineError(metrics.StageAck)
 		p.log.Error("ack failed", "error", err)
+		return
+	}
+	p.metrics.Ack(metrics.ResultOK)
+	for _, e := range events {
+		if !e.Timestamp.IsZero() {
+			p.metrics.EventAcked(string(e.Op), time.Since(e.Timestamp))
+		}
 	}
 }
 
@@ -70,14 +87,21 @@ func (p *Pipeline) Handle(lctx *replication.ListenerContext) {
 func (p *Pipeline) publish(m *sink.Message) bool {
 	pending := p.sinks
 	backoff := p.retry.InitialBackoff
-	for {
+	for attempt := 1; ; attempt++ {
 		var failed []namedSink
 		for _, s := range pending {
-			if err := s.Publish(p.ctx, m); err != nil {
+			start := time.Now()
+			err := s.Publish(p.ctx, m)
+			took := time.Since(start)
+			p.metrics.Publish(s.name, m.Op, err, took)
+			if err != nil {
 				if p.ctx.Err() != nil {
 					return false
 				}
-				p.log.Warn("publish failed, will retry", "sink", s.name, "topic", m.Topic, "op", m.Op, "backoff", backoff, "error", err)
+				p.metrics.Retry(s.name)
+				p.log.Warn("publish failed, will retry",
+					"sink", s.name, "topic", m.Topic, "op", m.Op, "event_id", m.ID, "lsn", m.LSN,
+					"attempt", attempt, "duration", took, "backoff", backoff, "error", err)
 				failed = append(failed, s)
 			}
 		}
