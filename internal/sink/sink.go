@@ -26,6 +26,8 @@ type Message struct {
 	Value []byte
 	// ID is a stable per-change identifier for broker-side dedup; may be empty.
 	ID string
+	// LSN is the source WAL position, for logs and broker headers; may be empty.
+	LSN string
 }
 
 // Sink publishes messages to one broker.

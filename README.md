@@ -37,6 +37,16 @@ Every sink receives the same JSON envelope:
 
 RabbitMQ publishes are persistent and wait for publisher confirms. An unroutable message (no queue bound to the exchange) is returned and treated as a failure, so the WAL stalls instead of losing the change. The exchange is declared on startup by default; use `exchange.declare: false` if it is managed elsewhere.
 
+Messages also carry `op`, `id` and `lsn` headers where the broker supports them, for correlation and deduplication.
+
+## Observability
+
+Metrics are served by go-pq-cdc at `postgres.metric.port/metrics` (default `8080`). walcast registers its collectors there, so there is a single Prometheus target; `/status` is liveness and `/slot` shows replication slot state. The health server exposes `/healthz` and `/readyz` on a separate port, `observability.health_port` (default `8081`; set `0` to disable).
+
+The `walcast_*` metrics cover publish attempts, latency, retries, sink health, event lag, acknowledgements and readiness. See [docs/observability.md](docs/observability.md) for the metric catalog, PromQL examples and alert rules.
+
+Logs are JSON by default and share a handler with go-pq-cdc. Set `observability.log_format: text` if you prefer readable logs; credentials in URLs are redacted.
+
 ## Delivery guarantees
 
 At-least-once, in WAL order. The WAL position is acknowledged only after **every enabled sink** has durably accepted the change. If a sink is down, walcast retries with backoff and stops advancing the slot (Postgres retains WAL meanwhile, so alert on slot lag). After a crash, recent changes may be redelivered; dedupe on `id`.

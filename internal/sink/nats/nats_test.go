@@ -73,3 +73,17 @@ func TestSubject(t *testing.T) {
 		t.Errorf("subject = %q", got)
 	}
 }
+
+func TestMessageHeaders(t *testing.T) {
+	m := &sink.Message{
+		Topic: "walcast.public.users", Op: "update",
+		ID: "0/1/public.users/update", LSN: "0/1", Value: []byte(`{}`),
+	}
+	msg := message(m)
+	if msg.Subject != "walcast.public.users.update" {
+		t.Errorf("subject = %q", msg.Subject)
+	}
+	if msg.Header.Get("op") != "update" || msg.Header.Get("id") != m.ID || msg.Header.Get("lsn") != "0/1" {
+		t.Errorf("headers = %v", msg.Header)
+	}
+}

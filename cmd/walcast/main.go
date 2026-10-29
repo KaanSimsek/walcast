@@ -14,6 +14,8 @@ import (
 	cdc "github.com/Trendyol/go-pq-cdc"
 
 	"walcast/internal/config"
+	"walcast/internal/health"
+	"walcast/internal/metrics"
 	"walcast/internal/pipeline"
 	"walcast/internal/sink"
 
@@ -37,14 +39,21 @@ func run(configPath string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.Postgres.Logger.LogLevel}))
+	base := newLogger(cfg)
+	log := base.With("component", "walcast")
+	// go-pq-cdc logs JSON to stdout by default. Give it our handler so both
+	// halves of the process use the same format and destination.
+	cfg.Postgres.Logger.Logger = base.With("component", "go-pq-cdc")
+
+	m := metrics.New()
+	defer m.SetReady(false)
 
 	sigCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
 	ctx, fail := context.WithCancelCause(sigCtx)
 	defer fail(nil)
 
-	pl := pipeline.New(ctx, fail, pipeline.NewRouter(cfg.Routing), cfg.Retry, log)
+	pl := pipeline.New(ctx, fail, pipeline.NewRouter(cfg.Routing), cfg.Retry, log, m)
 	defer pl.Close()
 
 	names, err := cfg.EnabledSinks()
@@ -61,10 +70,30 @@ func run(configPath string) error {
 		log.Info("sink enabled", "sink", name)
 	}
 
+	metricPort := cfg.Postgres.Metric.Port
+	if metricPort == 0 {
+		metricPort = 8080
+	}
+	log.Info("walcast starting", "sinks", names, "prefix", cfg.Routing.Prefix, "metrics_port", metricPort)
+
+	if healthPort := cfg.Observability.HealthPortValue(); healthPort > 0 {
+		healthSrv, err := health.New(healthPort, m.Ready, log)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := healthSrv.Close(); err != nil {
+				log.Warn("closing health server", "error", err)
+			}
+		}()
+		log.Info("health server listening", "port", healthPort)
+	}
+
 	connector, err := cdc.NewConnector(ctx, cfg.Postgres, pl.Handle)
 	if err != nil {
 		return fmt.Errorf("create connector: %w", err)
 	}
+	connector.SetMetricCollectors(m.Collectors()...)
 
 	// Start blocks until the connector is closed (it doesn't watch ctx itself),
 	// and it also returns on its own if setup fails, so wait on both.
@@ -72,6 +101,11 @@ func run(configPath string) error {
 	go func() {
 		defer close(started)
 		connector.Start(ctx)
+	}()
+	go func() {
+		if err := connector.WaitUntilReady(ctx); err == nil && ctx.Err() == nil {
+			m.SetReady(true)
+		}
 	}()
 
 	select {
@@ -99,4 +133,15 @@ func run(configPath string) error {
 		return nil
 	}
 	return cause
+}
+
+func newLogger(cfg *config.Config) *slog.Logger {
+	opts := &slog.HandlerOptions{Level: cfg.Postgres.Logger.LogLevel}
+	var h slog.Handler
+	if cfg.Observability.LogFormat == "text" {
+		h = slog.NewTextHandler(os.Stderr, opts)
+	} else {
+		h = slog.NewJSONHandler(os.Stderr, opts)
+	}
+	return slog.New(h)
 }

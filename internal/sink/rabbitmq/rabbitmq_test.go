@@ -60,6 +60,7 @@ func TestPublishing(t *testing.T) {
 		Key:   []byte("42"),
 		Value: []byte(`{"op":"update"}`),
 		ID:    "0/1/public.users/update",
+		LSN:   "0/1",
 	}
 	if got := routingKey(m); got != "walcast.public.users.update" {
 		t.Errorf("routing key = %q", got)
@@ -77,7 +78,7 @@ func TestPublishing(t *testing.T) {
 	if pub.ContentType != "application/json" {
 		t.Errorf("content type = %q", pub.ContentType)
 	}
-	if pub.Headers["op"] != "update" || pub.Headers["key"] != "42" {
+	if pub.Headers["op"] != "update" || pub.Headers["key"] != "42" || pub.Headers["id"] != m.ID || pub.Headers["lsn"] != "0/1" {
 		t.Errorf("headers = %v", pub.Headers)
 	}
 	if string(pub.Body) != string(m.Value) {

@@ -31,6 +31,7 @@ func (r *Router) Route(e event.Event) (*sink.Message, error) {
 		Key:   []byte(r.key(e)),
 		Value: value,
 		ID:    e.ID,
+		LSN:   e.LSN,
 	}, nil
 }
 

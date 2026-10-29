@@ -45,6 +45,73 @@ func TestParseRejectsNoEnabledSink(t *testing.T) {
 	}
 }
 
+func TestParseLogFormat(t *testing.T) {
+	t.Setenv("PW", "x")
+	cfg, err := Parse([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Observability.LogFormat != "json" {
+		t.Errorf("default log format = %q, want json", cfg.Observability.LogFormat)
+	}
+
+	withText := strings.Replace(minimal, "sinks:", "observability: {log_format: text}\nsinks:", 1)
+	cfg, err = Parse([]byte(withText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Observability.LogFormat != "text" {
+		t.Errorf("log format = %q, want text", cfg.Observability.LogFormat)
+	}
+
+	bad := strings.Replace(minimal, "sinks:", "observability: {log_format: yaml}\nsinks:", 1)
+	if _, err := Parse([]byte(bad)); err == nil || !strings.Contains(err.Error(), "log_format") {
+		t.Fatalf("err = %v, want log_format error", err)
+	}
+}
+
+func TestParseHealthPort(t *testing.T) {
+	t.Setenv("PW", "x")
+	cfg, err := Parse([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Observability.HealthPortValue(); got != DefaultHealthPort {
+		t.Errorf("default health port = %d, want %d", got, DefaultHealthPort)
+	}
+
+	cfg, err = Parse([]byte(strings.Replace(minimal, "sinks:", "observability: {health_port: 8082}\nsinks:", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Observability.HealthPortValue(); got != 8082 {
+		t.Errorf("health port = %d, want 8082", got)
+	}
+
+	cfg, err = Parse([]byte(strings.Replace(minimal, "sinks:", "observability: {health_port: 0}\nsinks:", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Observability.HealthPortValue(); got != 0 {
+		t.Errorf("disabled health port = %d, want 0", got)
+	}
+
+	bad := strings.Replace(minimal, "sinks:", "observability: {health_port: 70000}\nsinks:", 1)
+	if _, err := Parse([]byte(bad)); err == nil || !strings.Contains(err.Error(), "health_port") {
+		t.Fatalf("err = %v, want health_port error", err)
+	}
+
+	conflict := strings.Replace(minimal, "sinks:", "observability: {health_port: 8080}\nsinks:", 1)
+	if _, err := Parse([]byte(conflict)); err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Fatalf("err = %v, want port conflict error", err)
+	}
+
+	withMetric := strings.Replace(minimal, "  host: h", "  host: h\n  metric: {port: 8081}", 1)
+	if _, err := Parse([]byte(withMetric)); err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Fatalf("default health port should conflict with metric port: err = %v", err)
+	}
+}
+
 func TestExpandEnv(t *testing.T) {
 	t.Setenv("SET", "v")
 	got, err := expandEnv("${SET} ${UNSET_X:-def} ${UNSET_Y:-} $plain")

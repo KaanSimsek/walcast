@@ -9,6 +9,24 @@ import (
 	"walcast/internal/sink/sinktest"
 )
 
+func TestRecordHeaders(t *testing.T) {
+	m := &sink.Message{
+		Topic: "walcast.public.users", Op: "insert", Key: []byte("1"),
+		Value: []byte(`{}`), ID: "0/1/public.users/insert", LSN: "0/1",
+	}
+	rec := record(m)
+	if rec.Topic != m.Topic || string(rec.Key) != "1" || string(rec.Value) != "{}" {
+		t.Errorf("record = %+v", rec)
+	}
+	got := map[string]string{}
+	for _, h := range rec.Headers {
+		got[h.Key] = string(h.Value)
+	}
+	if got["op"] != "insert" || got["id"] != m.ID || got["lsn"] != "0/1" {
+		t.Errorf("headers = %v", got)
+	}
+}
+
 func TestOptionsValidation(t *testing.T) {
 	cases := []struct {
 		name, cfg, wantErr string
