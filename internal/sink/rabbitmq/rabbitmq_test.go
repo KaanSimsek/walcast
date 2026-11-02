@@ -1,6 +1,9 @@
 package rabbitmq
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -101,5 +104,62 @@ func TestExplicitExchangeSettings(t *testing.T) {
 	}
 	if boolOr(cfg.Exchange.Declare, true) {
 		t.Error("declare should be false")
+	}
+}
+
+func TestDLQDefaultsAndValidation(t *testing.T) {
+	cfg := Config{URL: "amqp://localhost"}
+	cfg.DLQ = &DLQConfig{Exchange: "walcast.dlq"}
+	if err := cfg.withDefaults("walcast"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DLQ.RoutingKey != "failed" || cfg.DLQ.ExchangeType != "topic" {
+		t.Errorf("DLQ defaults = %+v", cfg.DLQ)
+	}
+	if !boolOr(cfg.DLQ.Durable, true) || !boolOr(cfg.DLQ.Declare, true) {
+		t.Error("DLQ should default to durable and declared")
+	}
+
+	bad := Config{URL: "amqp://localhost", DLQ: &DLQConfig{}}
+	if err := bad.withDefaults("walcast"); err == nil || !strings.Contains(err.Error(), "dlq.exchange is required") {
+		t.Errorf("err = %v, want dlq.exchange error", err)
+	}
+
+	badType := Config{URL: "amqp://localhost", DLQ: &DLQConfig{Exchange: "x", ExchangeType: "random"}}
+	if err := badType.withDefaults("walcast"); err == nil || !strings.Contains(err.Error(), "dlq.exchange_type") {
+		t.Errorf("err = %v, want dlq.exchange_type error", err)
+	}
+}
+
+func TestClassifyPublishError(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       error
+		permanent bool
+		reason    string
+	}{
+		{"access refused", &amqp.Error{Code: amqp.AccessRefused}, true, "auth"},
+		{"not found", &amqp.Error{Code: amqp.NotFound}, true, "not_found"},
+		{"precondition", &amqp.Error{Code: amqp.PreconditionFailed}, true, "precondition_failed"},
+		{"channel closed", amqp.ErrClosed, false, ""},
+		{"timeout", context.DeadlineExceeded, false, ""},
+		{"unknown", errors.New("boom"), false, ""},
+	}
+	for _, c := range cases {
+		permanent, reason := classifyPublishError(fmt.Errorf("publish: %w", c.err))
+		if permanent != c.permanent || reason != c.reason {
+			t.Errorf("%s: got %v/%q, want %v/%q", c.name, permanent, reason, c.permanent, c.reason)
+		}
+	}
+}
+
+func TestDLQPublishing(t *testing.T) {
+	m := &sink.Message{Topic: "walcast.public.users", Op: "insert", Key: []byte("1"), Value: []byte(`{}`), ID: "id-1", LSN: "0/1"}
+	pub := dlqPublishing(m, sink.Failure{Reason: "unroutable", Attempts: 3, Permanent: true})
+	if pub.Headers["walcast-dlq-source"] != m.Topic || pub.Headers["walcast-dlq-reason"] != "unroutable" || pub.Headers["walcast-dlq-attempts"] != "3" {
+		t.Errorf("headers = %v", pub.Headers)
+	}
+	if pub.DeliveryMode != amqp.Persistent || string(pub.Body) != string(m.Value) {
+		t.Errorf("publishing = %+v", pub)
 	}
 }

@@ -27,6 +27,9 @@ position being acknowledged.
 | `walcast_sink_up` | gauge | `sink` | `1` after a successful publish, `0` after a failure. |
 | `walcast_sink_last_success_timestamp_seconds` | gauge | `sink` | Unix time of the last successful publish. |
 | `walcast_pipeline_errors_total` | counter | `stage` | Pipeline errors (`encode` or `ack`). |
+| `walcast_dead_letter_total` | counter | `sink`, `reason` | Events accepted by a sink's DLQ. |
+| `walcast_retries_exhausted_total` | counter | `sink` | Transient failures that reached `retry.max_attempts`. |
+| `walcast_dead_letter_errors_total` | counter | `sink` | Failed DLQ publishes. |
 | `walcast_ready` | gauge | - | `1` once the connector is ready, `0` during startup/shutdown. |
 | `walcast_build_info` | gauge | `version`, `commit`, `go_version` | Build metadata; value is always `1`. |
 
@@ -95,6 +98,22 @@ groups:
           severity: critical
         annotations:
           summary: walcast hit an encode or ack error
+
+      - alert: WalcastDeadLetters
+        expr: increase(walcast_dead_letter_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: events are being routed to a dead letter destination
+
+      - alert: WalcastDLQErrors
+        expr: increase(walcast_dead_letter_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: walcast cannot publish to a dead letter destination
 ```
 
 `WalcastSinkStale` is only meaningful while events are flowing; pair it with the

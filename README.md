@@ -49,13 +49,20 @@ Logs are JSON by default and share a handler with go-pq-cdc. Set `observability.
 
 ## Delivery guarantees
 
-At-least-once, in WAL order. The WAL position is acknowledged only after **every enabled sink** has durably accepted the change. If a sink is down, walcast retries with backoff and stops advancing the slot (Postgres retains WAL meanwhile, so alert on slot lag). After a crash, recent changes may be redelivered; dedupe on `id`.
+At-least-once, in WAL order. The WAL position is acknowledged only after **every enabled sink** has durably accepted the change (or accepted it into a configured DLQ). After a crash, recent changes may be redelivered; dedupe on `id`.
 
-With several sinks enabled, a slow or failing one delays all of them.
+Transient failures are retried with backoff up to `retry.max_attempts` (default `0` = forever). Permanent errors are not retried. When retries are exhausted, or the error is permanent:
+
+- If the sink has a DLQ configured, the event is published there and the WAL can advance.
+- Without a DLQ, walcast fails fast: the WAL position is not acknowledged and the process exits. Set `max_attempts: 0` if you prefer transient errors to keep retrying forever; permanent errors still stop without a DLQ.
+
+A DLQ publish failure also stops the pipeline; walcast never acknowledges an event that was neither delivered nor stored. See [docs/error-handling.md](docs/error-handling.md) for per-broker DLQ configuration and caveats.
+
+With several sinks enabled, a slow or failing one delays all of them until it is delivered or moved to its DLQ.
 
 ## Adding a broker
 
-1. `internal/sink/<name>/` with `config.go` (config struct, defaults and validation) and `<name>.go` implementing `sink.Sink`, with `func init() { sink.Register("<name>", New) }`. Decode its own config section via `sink.Config.Decode`.
+1. `internal/sink/<name>/` with `config.go` (config struct, defaults and validation) and `<name>.go` implementing `sink.Sink`, with `func init() { sink.Register("<name>", New) }`. Decode its own config section via `sink.Config.Decode`. Classify permanent errors with `sink.Permanent` and optionally implement `sink.DeadLetterer`.
 2. Blank-import it in `cmd/walcast/main.go`.
 3. Add a `sinks.<name>` section with `enabled: true`.
 

@@ -24,6 +24,16 @@ type Config struct {
 	} `yaml:"exchange"`
 	// PublishTimeout bounds one publish+confirm round trip (default 10s).
 	PublishTimeout time.Duration `yaml:"publish_timeout"`
+	// DLQ, when set, receives events that cannot be delivered.
+	DLQ *DLQConfig `yaml:"dlq"`
+}
+
+type DLQConfig struct {
+	Exchange     string `yaml:"exchange"`
+	RoutingKey   string `yaml:"routing_key"`
+	ExchangeType string `yaml:"exchange_type"` // direct|fanout|topic|headers (default topic)
+	Declare      *bool  `yaml:"declare"`
+	Durable      *bool  `yaml:"durable"`
 }
 
 func (c *Config) withDefaults(prefix string) error {
@@ -42,6 +52,21 @@ func (c *Config) withDefaults(prefix string) error {
 	}
 	if c.PublishTimeout <= 0 {
 		c.PublishTimeout = 10 * time.Second
+	}
+	if c.DLQ != nil {
+		if c.DLQ.Exchange == "" {
+			return errors.New("rabbitmq: dlq.exchange is required when dlq is configured")
+		}
+		if c.DLQ.RoutingKey == "" {
+			c.DLQ.RoutingKey = "failed"
+		}
+		switch c.DLQ.ExchangeType = strings.ToLower(c.DLQ.ExchangeType); c.DLQ.ExchangeType {
+		case "":
+			c.DLQ.ExchangeType = "topic"
+		case "direct", "fanout", "topic", "headers":
+		default:
+			return fmt.Errorf("rabbitmq: unknown dlq.exchange_type %q", c.DLQ.ExchangeType)
+		}
 	}
 	return nil
 }

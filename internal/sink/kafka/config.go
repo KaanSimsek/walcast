@@ -23,6 +23,13 @@ type Config struct {
 		Username  string `yaml:"username"`
 		Password  string `yaml:"password"`
 	} `yaml:"sasl"`
+	// DLQ, when set, receives events that cannot be delivered. The topic must
+	// exist unless auto_create_topics is enabled.
+	DLQ *DLQConfig `yaml:"dlq"`
+}
+
+type DLQConfig struct {
+	Topic string `yaml:"topic"`
 }
 
 func (c Config) options() ([]kgo.Opt, error) {

@@ -8,6 +8,7 @@ package rabbitmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -70,19 +71,17 @@ func (s *Sink) connect(ctx context.Context) error {
 		return fmt.Errorf("rabbitmq: open channel: %w", err)
 	}
 	if boolOr(s.cfg.Exchange.Declare, true) {
-		err := ch.ExchangeDeclare(
-			s.cfg.Exchange.Name,
-			s.cfg.Exchange.Type,
-			boolOr(s.cfg.Exchange.Durable, true),
-			false,
-			false,
-			false,
-			nil,
-		)
-		if err != nil {
+		if err := declareExchange(ch, s.cfg.Exchange.Name, s.cfg.Exchange.Type, boolOr(s.cfg.Exchange.Durable, true)); err != nil {
 			ch.Close()
 			conn.Close()
 			return fmt.Errorf("rabbitmq: declare exchange %q: %w", s.cfg.Exchange.Name, err)
+		}
+	}
+	if s.cfg.DLQ != nil && boolOr(s.cfg.DLQ.Declare, true) {
+		if err := declareExchange(ch, s.cfg.DLQ.Exchange, s.cfg.DLQ.ExchangeType, boolOr(s.cfg.DLQ.Durable, true)); err != nil {
+			ch.Close()
+			conn.Close()
+			return fmt.Errorf("rabbitmq: declare DLQ exchange %q: %w", s.cfg.DLQ.Exchange, err)
 		}
 	}
 	if err := ch.Confirm(false); err != nil {
@@ -99,6 +98,17 @@ func (s *Sink) connect(ctx context.Context) error {
 }
 
 func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
+	err := s.publish(ctx, s.cfg.Exchange.Name, routingKey(m), publishing(m))
+	if err == nil || sink.IsPermanent(err) {
+		return err
+	}
+	if permanent, reason := classifyPublishError(err); permanent {
+		return sink.Permanent(err, reason)
+	}
+	return err
+}
+
+func (s *Sink) publish(ctx context.Context, exchange, key string, pub amqp.Publishing) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -113,9 +123,8 @@ func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.PublishTimeout)
 	defer cancel()
 
-	key := routingKey(m)
 	// mandatory makes an unroutable message come back instead of disappearing.
-	if err := s.ch.PublishWithContext(ctx, s.cfg.Exchange.Name, key, true, false, publishing(m)); err != nil {
+	if err := s.ch.PublishWithContext(ctx, exchange, key, true, false, pub); err != nil {
 		s.closeLocked()
 		return fmt.Errorf("rabbitmq publish to %s: %w", key, err)
 	}
@@ -134,7 +143,7 @@ func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
 			s.closeLocked()
 			return fmt.Errorf("rabbitmq publish to %s: %w", key, ctx.Err())
 		}
-		return fmt.Errorf("rabbitmq: message to %s is unroutable (%d %s), bind a queue to the exchange", key, r.ReplyCode, r.ReplyText)
+		return sink.Permanent(fmt.Errorf("rabbitmq: message to %s is unroutable (%d %s), bind a queue to the exchange", key, r.ReplyCode, r.ReplyText), "unroutable")
 	case c := <-s.confirms:
 		if !c.Ack {
 			s.closeLocked()
@@ -145,6 +154,38 @@ func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
 		s.closeLocked()
 		return fmt.Errorf("rabbitmq publish to %s: %w", key, ctx.Err())
 	}
+}
+
+func classifyPublishError(err error) (permanent bool, reason string) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false, ""
+	}
+	if errors.Is(err, amqp.ErrClosed) {
+		return false, ""
+	}
+	var ae *amqp.Error
+	if !errors.As(err, &ae) {
+		return false, ""
+	}
+	switch ae.Code {
+	case amqp.AccessRefused:
+		return true, "auth"
+	case amqp.NotFound:
+		return true, "not_found"
+	case amqp.ResourceLocked:
+		return true, "resource_locked"
+	case amqp.PreconditionFailed:
+		return true, "precondition_failed"
+	case amqp.NotAllowed:
+		return true, "not_allowed"
+	case amqp.NotImplemented:
+		return true, "not_implemented"
+	}
+	return false, ""
+}
+
+func declareExchange(ch *amqp.Channel, name, typ string, durable bool) error {
+	return ch.ExchangeDeclare(name, typ, durable, false, false, false, nil)
 }
 
 func routingKey(m *sink.Message) string {
@@ -168,6 +209,25 @@ func publishing(m *sink.Message) amqp.Publishing {
 		Headers:      headers,
 		Body:         m.Value,
 	}
+}
+
+func dlqPublishing(m *sink.Message, f sink.Failure) amqp.Publishing {
+	pub := publishing(m)
+	pub.Headers = amqp.Table{}
+	for k, v := range sink.DLQHeaders(m, f) {
+		pub.Headers[k] = v
+	}
+	return pub
+}
+
+func (s *Sink) DeadLetter(ctx context.Context, m *sink.Message, f sink.Failure) error {
+	if s.cfg.DLQ == nil {
+		return sink.ErrDeadLetterNotConfigured
+	}
+	if err := s.publish(ctx, s.cfg.DLQ.Exchange, s.cfg.DLQ.RoutingKey, dlqPublishing(m, f)); err != nil {
+		return fmt.Errorf("rabbitmq dead letter to %s: %w", s.cfg.DLQ.Exchange, err)
+	}
+	return nil
 }
 
 func (s *Sink) Close() error {
