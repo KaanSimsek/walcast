@@ -1,0 +1,142 @@
+# Default values for walcast.
+
+# A PostgreSQL logical replication slot has a single active consumer, so keep
+# this at 1. Use Recreate to avoid overlapping pods during upgrades.
+replicaCount: 1
+
+image:
+  repository: kaansimsek/walcast
+  pullPolicy: IfNotPresent
+  # Defaults to Chart.appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  capabilities:
+    drop:
+      - ALL
+
+# Rendered verbatim into config.yaml. At minimum set Postgres, publication
+# tables, and one enabled sink. The pod will exit until the config is valid.
+# Keep postgres.metric.port and observability.health_port in sync with metrics.port
+# and health.port below.
+config:
+  postgres:
+    host: postgres
+    port: 5432
+    username: cdc_user
+    password: ${PG_PASSWORD}
+    database: app
+    logger:
+      level: info
+    publication:
+      name: walcast_pub
+      createIfNotExists: true
+      operations: [INSERT, UPDATE, DELETE, TRUNCATE]
+      tables: []
+      # - name: users
+      #   schema: public
+      #   replicaIdentity: FULL
+    slot:
+      name: walcast_slot
+      createIfNotExists: true
+      slotActivityCheckerInterval: 3000
+    metric:
+      port: 8080
+  routing:
+    prefix: walcast
+    key_columns: {}
+  retry:
+    initial_backoff: 200ms
+    max_backoff: 30s
+    max_attempts: 0
+  observability:
+    log_format: json
+    health_port: 8081
+  sinks: {}
+  # Example sink configuration:
+  # sinks:
+  #   kafka:
+  #     enabled: true
+  #     brokers: [kafka:9092]
+  #     auto_create_topics: true
+  #     compression: lz4
+
+# Use a pre-existing ConfigMap instead of rendering config above.
+existingConfigMap: ""
+
+# Environment variables referenced by ${VAR} in config.
+env: []
+# - name: PG_PASSWORD
+#   valueFrom:
+#     secretKeyRef:
+#       name: walcast-postgres
+#       key: password
+envFrom: []
+# - secretRef:
+#     name: walcast-env
+
+metrics:
+  port: 8080
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+health:
+  port: 8081
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 6
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 2
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 6
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+
+updateStrategy:
+  type: Recreate
+terminationGracePeriodSeconds: 60
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+extraVolumes: []
+extraVolumeMounts: []

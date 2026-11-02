@@ -26,6 +26,10 @@ const (
 var (
 	publishBuckets = []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30}
 	lagBuckets     = []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600}
+
+	// Version and Commit can be set at build time with -ldflags.
+	Version = "dev"
+	Commit  = "unknown"
 )
 
 type Metrics struct {
@@ -134,19 +138,29 @@ func New() *Metrics {
 }
 
 func buildLabels() prometheus.Labels {
-	version, commit := "dev", "unknown"
+	version, commit := Version, Commit
 	if info, ok := debug.ReadBuildInfo(); ok {
-		if info.Main.Version != "" && info.Main.Version != "(devel)" {
-			version = info.Main.Version
+		if version == "" || version == "dev" {
+			if info.Main.Version != "" && info.Main.Version != "(devel)" {
+				version = info.Main.Version
+			}
 		}
-		for _, s := range info.Settings {
-			if s.Key == "vcs.revision" && s.Value != "" {
-				commit = s.Value
-				if len(commit) > 12 {
-					commit = commit[:12]
+		if commit == "" || commit == "unknown" {
+			for _, s := range info.Settings {
+				if s.Key == "vcs.revision" && s.Value != "" {
+					commit = s.Value
+					if len(commit) > 12 {
+						commit = commit[:12]
+					}
 				}
 			}
 		}
+	}
+	if version == "" {
+		version = "dev"
+	}
+	if commit == "" {
+		commit = "unknown"
 	}
 	return prometheus.Labels{
 		"version":    version,

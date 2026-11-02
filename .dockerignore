@@ -1,0 +1,10 @@
+.git
+.github
+.idea
+charts
+docs
+config.yaml
+config.example.yaml
+walcast
+*.md
+LICENSE

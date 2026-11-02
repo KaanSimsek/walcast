@@ -38,3 +38,42 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: walcast:ci
+          build-args: |
+            VERSION=ci
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  helm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Lint
+        run: helm lint charts/walcast
+
+      - name: Render
+        run: |
+          helm template walcast charts/walcast > /dev/null
+          helm template walcast charts/walcast \
+            --set metrics.serviceMonitor.enabled=true \
+            --set serviceAccount.create=false \
+            --set existingConfigMap=walcast-config > /dev/null

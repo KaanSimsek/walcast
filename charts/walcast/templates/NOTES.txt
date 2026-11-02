@@ -1,0 +1,20 @@
+walcast has been installed.
+
+Before it can stream changes, configure Postgres, publication tables and at
+least one sink in values.yaml (or set existingConfigMap). Provide ${PG_PASSWORD}
+and any other referenced variables through env or envFrom; the pod will exit
+until the config is valid.
+
+walcast uses a single PostgreSQL replication slot. Keep replicaCount at 1 and
+leave updateStrategy as Recreate so two pods never consume the same slot.
+
+{{- if .Values.service.enabled }}
+
+Metrics:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "walcast.fullname" . }} {{ .Values.metrics.port }}:{{ .Values.metrics.port }}
+  curl http://127.0.0.1:{{ .Values.metrics.port }}/metrics
+
+Health:
+  curl http://127.0.0.1:{{ .Values.health.port }}/healthz
+  curl http://127.0.0.1:{{ .Values.health.port }}/readyz
+{{- end }}
