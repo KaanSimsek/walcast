@@ -1,0 +1,30 @@
+{{- if and .Values.service.enabled .Values.health.port }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "walcast.fullname" . }}-test-health"
+  labels:
+    {{- include "walcast.selectorLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: wget
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - "wget -qO- http://{{ include "walcast.fullname" . }}:{{ .Values.health.port }}/healthz && wget -qO- http://{{ include "walcast.fullname" . }}:{{ .Values.health.port }}/readyz"
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+{{- end }}

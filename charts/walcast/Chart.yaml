@@ -1,0 +1,11 @@
+apiVersion: v2
+name: walcast
+description: Streams PostgreSQL logical replication changes to Kafka, NATS JetStream and RabbitMQ.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/KaanSimsek/walcast
+sources:
+  - https://github.com/KaanSimsek/walcast
+maintainers:
+  - name: Kaan Simsek

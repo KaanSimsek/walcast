@@ -18,6 +18,34 @@ go run ./cmd/walcast -config config.yaml
 
 Postgres needs `wal_level=logical` and a role with `REPLICATION` (plus rights to create the publication/slot, or create them yourself).
 
+## Docker
+
+Build a release image (nothing is pushed automatically):
+
+```sh
+docker build \
+  --build-arg VERSION=0.1.0 \
+  --build-arg COMMIT=$(git rev-parse --short HEAD) \
+  -t kaansimsek/walcast:0.1.0 .
+
+docker run --rm \
+  -p 8080:8080 -p 8081:8081 \
+  -v "$PWD/config.yaml:/etc/walcast/config.yaml:ro" \
+  kaansimsek/walcast:0.1.0
+```
+
+Metrics are on `8080` and health probes on `8081` by default.
+
+## Kubernetes
+
+A Helm chart lives in [`charts/walcast`](charts/walcast):
+
+```sh
+helm install walcast ./charts/walcast -f my-values.yaml
+```
+
+The defaults still need Postgres, publication tables and at least one sink; see the [chart README](charts/walcast/README.md). Keep `replicaCount` at `1` because a logical replication slot has a single active consumer.
+
 ## Event format
 
 Every sink receives the same JSON envelope:
