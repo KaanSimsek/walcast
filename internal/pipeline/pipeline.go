@@ -7,6 +7,8 @@ package pipeline
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"time"
@@ -81,34 +83,84 @@ func (p *Pipeline) Handle(lctx *replication.ListenerContext) {
 	}
 }
 
-// publish delivers m to every sink, retrying with jittered exponential backoff.
-// A sink that already accepted m is not sent it again when another one fails.
+// pendingSink tracks retries for one sink while a message is delivered.
+type pendingSink struct {
+	namedSink
+	attempts int
+}
+
+// publish delivers m to every sink, retrying transient failures with jittered
+// exponential backoff. A sink that already accepted m is not sent it again.
+//
+// Permanent failures go straight to the sink's dead letter destination. After
+// retry.MaxAttempts transient failures the same happens. If the sink has no DLQ,
+// the pipeline fails instead of acknowledging a message that was not delivered.
 // Returns false only if the pipeline context ended first.
 func (p *Pipeline) publish(m *sink.Message) bool {
-	pending := p.sinks
+	pending := make([]pendingSink, len(p.sinks))
+	for i, s := range p.sinks {
+		pending[i] = pendingSink{namedSink: s}
+	}
 	backoff := p.retry.InitialBackoff
-	for attempt := 1; ; attempt++ {
-		var failed []namedSink
-		for _, s := range pending {
+	for {
+		next := make([]pendingSink, 0, len(pending))
+		for _, ps := range pending {
 			start := time.Now()
-			err := s.Publish(p.ctx, m)
+			err := ps.Publish(p.ctx, m)
 			took := time.Since(start)
-			p.metrics.Publish(s.name, m.Op, err, took)
-			if err != nil {
+			p.metrics.Publish(ps.name, m.Op, err, took)
+			if err == nil {
+				continue
+			}
+			if p.ctx.Err() != nil {
+				return false
+			}
+
+			ps.attempts++
+			permanent := sink.IsPermanent(err)
+			reason := sink.Reason(err)
+			if reason == "" {
+				if permanent {
+					reason = "permanent"
+				} else {
+					reason = "transient"
+				}
+			}
+			exhausted := p.retry.MaxAttempts > 0 && ps.attempts >= p.retry.MaxAttempts
+			if permanent || exhausted {
+				if exhausted && !permanent {
+					p.metrics.RetriesExhausted(ps.name)
+				}
+				failure := "retries exhausted"
+				if permanent {
+					failure = "permanent publish failure"
+				}
+				p.log.Error(failure,
+					"sink", ps.name, "topic", m.Topic, "op", m.Op, "event_id", m.ID, "lsn", m.LSN,
+					"attempts", ps.attempts, "reason", reason, "error", err)
 				if p.ctx.Err() != nil {
 					return false
 				}
-				p.metrics.Retry(s.name)
-				p.log.Warn("publish failed, will retry",
-					"sink", s.name, "topic", m.Topic, "op", m.Op, "event_id", m.ID, "lsn", m.LSN,
-					"attempt", attempt, "duration", took, "backoff", backoff, "error", err)
-				failed = append(failed, s)
+				if err := p.deadLetter(ps.namedSink, m, err, ps.attempts, permanent, reason); err != nil {
+					if p.ctx.Err() != nil {
+						return false
+					}
+					p.fail(err)
+					return false
+				}
+				continue
 			}
+
+			p.metrics.Retry(ps.name)
+			p.log.Warn("publish failed, will retry",
+				"sink", ps.name, "topic", m.Topic, "op", m.Op, "event_id", m.ID, "lsn", m.LSN,
+				"attempt", ps.attempts, "duration", took, "backoff", backoff, "reason", reason, "error", err)
+			next = append(next, ps)
 		}
-		if len(failed) == 0 {
+		if len(next) == 0 {
 			return true
 		}
-		pending = failed
+		pending = next
 
 		// Full jitter in [backoff/2, backoff] so parallel instances don't sync up.
 		wait := backoff/2 + rand.N(backoff/2+1)
@@ -119,6 +171,26 @@ func (p *Pipeline) publish(m *sink.Message) bool {
 		}
 		backoff = min(backoff*2, p.retry.MaxBackoff)
 	}
+}
+
+func (p *Pipeline) deadLetter(s namedSink, m *sink.Message, cause error, attempts int, permanent bool, reason string) error {
+	dl, ok := s.Sink.(sink.DeadLetterer)
+	if !ok {
+		return fmt.Errorf("sink %s: no dead letter queue configured: %w", s.name, cause)
+	}
+	f := sink.Failure{Err: cause, Reason: reason, Attempts: attempts, Permanent: permanent}
+	if err := dl.DeadLetter(p.ctx, m, f); err != nil {
+		if errors.Is(err, sink.ErrDeadLetterNotConfigured) {
+			return fmt.Errorf("sink %s: no dead letter queue configured: %w", s.name, cause)
+		}
+		p.metrics.DeadLetterError(s.name)
+		return sink.DeadLetterError(s.name, err)
+	}
+	p.metrics.DeadLetter(s.name, reason)
+	p.log.Warn("event moved to dead letter queue",
+		"sink", s.name, "topic", m.Topic, "op", m.Op, "event_id", m.ID, "lsn", m.LSN,
+		"attempts", attempts, "permanent", permanent, "reason", reason)
+	return nil
 }
 
 func (p *Pipeline) Close() {

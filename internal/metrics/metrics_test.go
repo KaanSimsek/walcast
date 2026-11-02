@@ -44,6 +44,9 @@ func TestMetricsRecordAckAndLag(t *testing.T) {
 	m.Ack(ResultError)
 	m.EventAcked("insert", 2*time.Second)
 	m.PipelineError(StageEncode)
+	m.DeadLetter("kafka", "unroutable")
+	m.RetriesExhausted("kafka")
+	m.DeadLetterError("kafka")
 	m.SetReady(true)
 
 	if got := testutil.ToFloat64(m.ackTotal.WithLabelValues(ResultOK)); got != 1 {
@@ -54,6 +57,15 @@ func TestMetricsRecordAckAndLag(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(m.pipelineErrors.WithLabelValues(StageEncode)); got != 1 {
 		t.Errorf("pipeline errors = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.deadLetter.WithLabelValues("kafka", "unroutable")); got != 1 {
+		t.Errorf("dead letters = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.retriesExhausted.WithLabelValues("kafka")); got != 1 {
+		t.Errorf("retries exhausted = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.dlqErrors.WithLabelValues("kafka")); got != 1 {
+		t.Errorf("DLQ errors = %v, want 1", got)
 	}
 	if got := testutil.ToFloat64(m.ready); got != 1 {
 		t.Errorf("ready = %v, want 1", got)
@@ -81,6 +93,9 @@ func TestCollectorsRegister(t *testing.T) {
 	m.EventAcked("insert", time.Second)
 	m.Ack(ResultOK)
 	m.PipelineError(StageEncode)
+	m.DeadLetter("kafka", "unroutable")
+	m.RetriesExhausted("kafka")
+	m.DeadLetterError("kafka")
 	m.SetReady(true)
 
 	reg := prometheus.NewRegistry()

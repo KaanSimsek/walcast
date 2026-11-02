@@ -45,6 +45,31 @@ func TestParseRejectsNoEnabledSink(t *testing.T) {
 	}
 }
 
+func TestParseRetryMaxAttempts(t *testing.T) {
+	t.Setenv("PW", "x")
+	cfg, err := Parse([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retry.MaxAttempts != 0 {
+		t.Errorf("default max attempts = %d, want 0", cfg.Retry.MaxAttempts)
+	}
+
+	withMax := strings.Replace(minimal, "sinks:", "retry: {max_attempts: 5}\nsinks:", 1)
+	cfg, err = Parse([]byte(withMax))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retry.MaxAttempts != 5 {
+		t.Errorf("max attempts = %d, want 5", cfg.Retry.MaxAttempts)
+	}
+
+	bad := strings.Replace(minimal, "sinks:", "retry: {max_attempts: -1}\nsinks:", 1)
+	if _, err := Parse([]byte(bad)); err == nil || !strings.Contains(err.Error(), "max_attempts") {
+		t.Fatalf("err = %v, want max_attempts error", err)
+	}
+}
+
 func TestParseLogFormat(t *testing.T) {
 	t.Setenv("PW", "x")
 	cfg, err := Parse([]byte(minimal))
