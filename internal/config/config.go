@@ -41,6 +41,9 @@ type Routing struct {
 type Retry struct {
 	InitialBackoff time.Duration `yaml:"initial_backoff"`
 	MaxBackoff     time.Duration `yaml:"max_backoff"`
+	// MaxAttempts bounds transient publish retries per sink and event. 0 means
+	// retry forever.
+	MaxAttempts int `yaml:"max_attempts"`
 }
 
 // DefaultHealthPort is where /healthz and /readyz are served unless configured
@@ -113,6 +116,9 @@ func Parse(raw []byte) (*Config, error) {
 	}
 	if cfg.Retry.MaxBackoff < cfg.Retry.InitialBackoff {
 		return nil, errors.New("retry.max_backoff must be >= retry.initial_backoff")
+	}
+	if cfg.Retry.MaxAttempts < 0 {
+		return nil, errors.New("retry.max_attempts must be >= 0")
 	}
 	switch cfg.Observability.LogFormat = strings.ToLower(cfg.Observability.LogFormat); cfg.Observability.LogFormat {
 	case "":

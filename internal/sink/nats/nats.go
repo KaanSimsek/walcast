@@ -20,9 +20,10 @@ import (
 func init() { sink.Register("nats", New) }
 
 type Sink struct {
-	nc      *natsgo.Conn
-	js      jetstream.JetStream
-	timeout time.Duration
+	nc         *natsgo.Conn
+	js         jetstream.JetStream
+	timeout    time.Duration
+	dlqSubject string
 }
 
 func New(ctx context.Context, sc sink.Config) (sink.Sink, error) {
@@ -66,7 +67,11 @@ func New(ctx context.Context, sc sink.Config) (sink.Sink, error) {
 		nc.Close()
 		return nil, err
 	}
-	return &Sink{nc: nc, js: js, timeout: cfg.PublishTimeout}, nil
+	s := &Sink{nc: nc, js: js, timeout: cfg.PublishTimeout}
+	if cfg.DLQ != nil {
+		s.dlqSubject = cfg.DLQ.Subject
+	}
+	return s, nil
 }
 
 func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config, prefix string) error {
@@ -113,7 +118,68 @@ func (s *Sink) Publish(ctx context.Context, m *sink.Message) error {
 	}
 	msg := message(m)
 	if _, err := s.js.PublishMsg(ctx, msg, opts...); err != nil {
-		return fmt.Errorf("nats publish to %s: %w", msg.Subject, err)
+		err = fmt.Errorf("nats publish to %s: %w", msg.Subject, err)
+		if permanent, reason := classifyPublishError(err); permanent {
+			return sink.Permanent(err, reason)
+		}
+		return err
+	}
+	return nil
+}
+
+func classifyPublishError(err error) (permanent bool, reason string) {
+	switch {
+	case errors.Is(err, natsgo.ErrMaxPayload):
+		return true, "max_payload"
+	case errors.Is(err, natsgo.ErrAuthorization),
+		errors.Is(err, natsgo.ErrAuthExpired),
+		errors.Is(err, natsgo.ErrPermissionViolation):
+		return true, "auth"
+	case errors.Is(err, natsgo.ErrBadSubject):
+		return true, "invalid_subject"
+	case errors.Is(err, jetstream.ErrStreamNotFound):
+		return true, "stream_not_found"
+	}
+
+	var jsErr jetstream.JetStreamError
+	if errors.As(err, &jsErr) {
+		if api := jsErr.APIError(); api != nil {
+			switch api.Code {
+			case 400:
+				return true, "invalid_request"
+			case 401, 403:
+				return true, "auth"
+			case 404:
+				return true, "not_found"
+			case 409:
+				return true, "conflict"
+			}
+		}
+	}
+	return false, ""
+}
+
+func deadLetterMessage(subject string, m *sink.Message, f sink.Failure) *natsgo.Msg {
+	msg := &natsgo.Msg{Subject: subject, Data: m.Value, Header: natsgo.Header{}}
+	for k, v := range sink.DLQHeaders(m, f) {
+		msg.Header.Set(k, v)
+	}
+	return msg
+}
+
+func (s *Sink) DeadLetter(ctx context.Context, m *sink.Message, f sink.Failure) error {
+	if s.dlqSubject == "" {
+		return sink.ErrDeadLetterNotConfigured
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	var opts []jetstream.PublishOpt
+	if m.ID != "" {
+		opts = append(opts, jetstream.WithMsgID("dlq/"+m.ID))
+	}
+	if _, err := s.js.PublishMsg(ctx, deadLetterMessage(s.dlqSubject, m, f), opts...); err != nil {
+		return fmt.Errorf("nats dead letter to %s: %w", s.dlqSubject, err)
 	}
 	return nil
 }

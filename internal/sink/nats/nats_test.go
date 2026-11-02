@@ -1,6 +1,8 @@
 package nats
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +39,7 @@ func TestConfigValidation(t *testing.T) {
 	}{
 		{"missing stream name", "url: nats://localhost:4222", "stream.name is required"},
 		{"bad storage", "stream: {name: WALCAST, storage: disk}", "unknown stream.storage"},
+		{"dlq without subject", "stream: {name: WALCAST}\ndlq: {}", "dlq.subject is required"},
 	}
 	for _, c := range cases {
 		var cfg Config
@@ -84,6 +87,40 @@ func TestMessageHeaders(t *testing.T) {
 		t.Errorf("subject = %q", msg.Subject)
 	}
 	if msg.Header.Get("op") != "update" || msg.Header.Get("id") != m.ID || msg.Header.Get("lsn") != "0/1" {
+		t.Errorf("headers = %v", msg.Header)
+	}
+}
+
+func TestClassifyPublishError(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       error
+		permanent bool
+		reason    string
+	}{
+		{"max payload", natsgo.ErrMaxPayload, true, "max_payload"},
+		{"auth", natsgo.ErrAuthorization, true, "auth"},
+		{"bad subject", natsgo.ErrBadSubject, true, "invalid_subject"},
+		{"stream missing", jetstream.ErrStreamNotFound, true, "stream_not_found"},
+		{"api forbidden", &jetstream.APIError{Code: 403, Description: "forbidden"}, true, "auth"},
+		{"no responders", natsgo.ErrNoResponders, false, ""},
+		{"unknown", errors.New("boom"), false, ""},
+	}
+	for _, c := range cases {
+		permanent, reason := classifyPublishError(fmt.Errorf("publish: %w", c.err))
+		if permanent != c.permanent || reason != c.reason {
+			t.Errorf("%s: got %v/%q, want %v/%q", c.name, permanent, reason, c.permanent, c.reason)
+		}
+	}
+}
+
+func TestDeadLetterMessage(t *testing.T) {
+	m := &sink.Message{Topic: "walcast.public.users", Op: "update", Key: []byte("7"), Value: []byte(`{}`), ID: "id-1", LSN: "0/1"}
+	msg := deadLetterMessage("walcast.dlq", m, sink.Failure{Reason: "stream_not_found", Attempts: 4})
+	if msg.Subject != "walcast.dlq" || string(msg.Data) != "{}" {
+		t.Errorf("message = %+v", msg)
+	}
+	if msg.Header.Get("walcast-dlq-source") != m.Topic || msg.Header.Get("walcast-dlq-reason") != "stream_not_found" || msg.Header.Get("walcast-dlq-attempts") != "4" {
 		t.Errorf("headers = %v", msg.Header)
 	}
 }

@@ -29,18 +29,21 @@ var (
 )
 
 type Metrics struct {
-	publishTotal    *prometheus.CounterVec
-	publishDuration *prometheus.HistogramVec
-	publishRetries  *prometheus.CounterVec
-	eventLag        *prometheus.HistogramVec
-	ackTotal        *prometheus.CounterVec
-	sinkUp          *prometheus.GaugeVec
-	lastSuccess     *prometheus.GaugeVec
-	pipelineErrors  *prometheus.CounterVec
-	ready           prometheus.Gauge
-	readyState      atomic.Bool
-	buildInfo       prometheus.Gauge
-	process         prometheus.Collector
+	publishTotal     *prometheus.CounterVec
+	publishDuration  *prometheus.HistogramVec
+	publishRetries   *prometheus.CounterVec
+	eventLag         *prometheus.HistogramVec
+	ackTotal         *prometheus.CounterVec
+	sinkUp           *prometheus.GaugeVec
+	lastSuccess      *prometheus.GaugeVec
+	pipelineErrors   *prometheus.CounterVec
+	deadLetter       *prometheus.CounterVec
+	retriesExhausted *prometheus.CounterVec
+	dlqErrors        *prometheus.CounterVec
+	ready            prometheus.Gauge
+	readyState       atomic.Bool
+	buildInfo        prometheus.Gauge
+	process          prometheus.Collector
 }
 
 func New() *Metrics {
@@ -95,6 +98,24 @@ func New() *Metrics {
 			Name:      "errors_total",
 			Help:      "Pipeline errors by stage.",
 		}, []string{"stage"}),
+		deadLetter: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "walcast",
+			Subsystem: "dead_letter",
+			Name:      "total",
+			Help:      "Events published to a dead letter destination.",
+		}, []string{"sink", "reason"}),
+		retriesExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "walcast",
+			Subsystem: "retries",
+			Name:      "exhausted_total",
+			Help:      "Transient publish failures that reached the retry limit.",
+		}, []string{"sink"}),
+		dlqErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "walcast",
+			Subsystem: "dead_letter",
+			Name:      "errors_total",
+			Help:      "Failed dead letter publishes.",
+		}, []string{"sink"}),
 		ready: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: "walcast",
 			Name:      "ready",
@@ -146,6 +167,9 @@ func (m *Metrics) Collectors() []prometheus.Collector {
 		m.sinkUp,
 		m.lastSuccess,
 		m.pipelineErrors,
+		m.deadLetter,
+		m.retriesExhausted,
+		m.dlqErrors,
 		m.ready,
 		m.buildInfo,
 		m.process,
@@ -186,6 +210,21 @@ func (m *Metrics) Ack(result string) {
 
 func (m *Metrics) PipelineError(stage string) {
 	m.pipelineErrors.WithLabelValues(stage).Inc()
+}
+
+func (m *Metrics) DeadLetter(sink, reason string) {
+	if reason == "" {
+		reason = "unknown"
+	}
+	m.deadLetter.WithLabelValues(sink, reason).Inc()
+}
+
+func (m *Metrics) RetriesExhausted(sink string) {
+	m.retriesExhausted.WithLabelValues(sink).Inc()
+}
+
+func (m *Metrics) DeadLetterError(sink string) {
+	m.dlqErrors.WithLabelValues(sink).Inc()
 }
 
 func (m *Metrics) SetReady(ready bool) {

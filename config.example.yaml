@@ -34,6 +34,7 @@ routing:
 retry:
   initial_backoff: 200ms
   max_backoff: 30s
+  max_attempts: 0                # transient retry limit per sink; 0 = forever
 
 observability:
   log_format: json               # json (default) | text; applies to walcast and go-pq-cdc
@@ -48,6 +49,8 @@ sinks:
     compression: lz4             # none|gzip|snappy|lz4|zstd
     # tls: true
     # sasl: { mechanism: scram-sha-512, username: u, password: ${KAFKA_PASSWORD} }
+    # dlq:
+    #   topic: walcast.dlq
 
   nats:
     enabled: false
@@ -58,6 +61,8 @@ sinks:
       create: true               # creates stream for "<prefix>.>" if missing; never modifies an existing one
       storage: file              # file|memory
       replicas: 1
+    # dlq:
+    #   subject: walcast.dlq     # must be covered by the stream above
 
   rabbitmq:
     enabled: false
@@ -68,3 +73,9 @@ sinks:
       durable: true
       declare: true              # create the exchange if missing; mismatched settings are an error
     # publish_timeout: 10s
+    # dlq:
+    #   exchange: walcast.dlq
+    #   routing_key: failed
+    #   exchange_type: topic
+    #   declare: true
+    #   durable: true

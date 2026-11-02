@@ -17,7 +17,10 @@ type Config struct {
 	Token     string `yaml:"token"`
 	// PublishTimeout bounds one publish+ack round trip (default 10s).
 	PublishTimeout time.Duration `yaml:"publish_timeout"`
-	Stream         struct {
+	// DLQ, when set, receives events that cannot be delivered. The subject must
+	// be covered by the configured JetStream stream.
+	DLQ    *DLQConfig `yaml:"dlq"`
+	Stream struct {
 		Name string `yaml:"name"`
 		// Create makes the stream (subjects "<prefix>.>") if it is missing. An
 		// existing stream is never modified. Without it the stream must already
@@ -26,6 +29,10 @@ type Config struct {
 		Storage  string `yaml:"storage"` // file (default) | memory
 		Replicas int    `yaml:"replicas"`
 	} `yaml:"stream"`
+}
+
+type DLQConfig struct {
+	Subject string `yaml:"subject"`
 }
 
 func (c *Config) withDefaults() error {
@@ -47,6 +54,9 @@ func (c *Config) withDefaults() error {
 	}
 	if c.Stream.Replicas < 1 {
 		c.Stream.Replicas = 1
+	}
+	if c.DLQ != nil && c.DLQ.Subject == "" {
+		return errors.New("nats: dlq.subject is required when dlq is configured")
 	}
 	return nil
 }
