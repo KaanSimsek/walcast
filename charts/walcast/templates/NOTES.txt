@@ -5,6 +5,10 @@ least one sink in values.yaml (or set existingConfigMap). Provide ${PG_PASSWORD}
 and any other referenced variables through env or envFrom; the pod will exit
 until the config is valid.
 
+Heartbeat is enabled by default (walcast_heartbeat, 5s). The CDC role needs
+CREATE on the schema for the first run, then INSERT and UPDATE on the table.
+Set config.postgres.heartbeat.table.name to "" to disable it.
+
 walcast uses a single PostgreSQL replication slot. Keep replicaCount at 1 and
 leave updateStrategy as Recreate so two pods never consume the same slot.
 

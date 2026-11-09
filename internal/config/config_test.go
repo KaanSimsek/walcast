@@ -137,6 +137,55 @@ func TestParseHealthPort(t *testing.T) {
 	}
 }
 
+func TestParseHeartbeat(t *testing.T) {
+	t.Setenv("PW", "x")
+	doc := `
+postgres:
+  host: h
+  username: u
+  password: ${PW}
+  database: d
+  heartbeat:
+    table: {name: walcast_heartbeat, schema: public}
+    interval: 5s
+  publication:
+    name: pub
+    createIfNotExists: true
+    operations: [INSERT]
+    tables:
+      - {name: walcast_heartbeat, schema: public, replicaIdentity: DEFAULT}
+  slot: {name: s, createIfNotExists: true}
+sinks:
+  kafka: {enabled: true, brokers: [b:9092]}
+`
+	cfg, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Postgres.Heartbeat.Table.Name != "walcast_heartbeat" || cfg.Postgres.Heartbeat.Table.Schema != "public" {
+		t.Errorf("heartbeat table = %+v", cfg.Postgres.Heartbeat.Table)
+	}
+	if cfg.Postgres.Heartbeat.Interval != 5*time.Second {
+		t.Errorf("heartbeat interval = %v", cfg.Postgres.Heartbeat.Interval)
+	}
+	found := false
+	for _, table := range cfg.Postgres.Publication.Tables {
+		if table.Name == "walcast_heartbeat" {
+			found = true
+			if table.ReplicaIdentity != "DEFAULT" {
+				t.Errorf("heartbeat replica identity = %q", table.ReplicaIdentity)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("heartbeat table is not in publication.tables")
+	}
+	cfg.Postgres.SetDefault()
+	if err := cfg.Postgres.Validate(); err != nil {
+		t.Errorf("postgres validation: %v", err)
+	}
+}
+
 func TestExpandEnv(t *testing.T) {
 	t.Setenv("SET", "v")
 	got, err := expandEnv("${SET} ${UNSET_X:-def} ${UNSET_Y:-} $plain")

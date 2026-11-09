@@ -18,6 +18,20 @@ go run ./cmd/walcast -config config.yaml
 
 Postgres needs `wal_level=logical` and a role with `REPLICATION` (plus rights to create the publication/slot, or create them yourself).
 
+## Idle databases and WAL growth
+
+A logical replication slot retains WAL until the consumer confirms it no longer needs it. If the CDC database is mostly idle while other databases on the same PostgreSQL instance are busy, WAL can grow even though walcast has nothing to stream.
+
+The example config and Helm chart enable a dedicated `walcast_heartbeat` table. Every `heartbeat.interval` (5s in the examples) go-pq-cdc updates one row, the change flows through the slot and is auto-acknowledged, and the slot can advance. Heartbeat events are not forwarded to sinks.
+
+The heartbeat table must:
+
+- be listed in `publication.tables`,
+- use `REPLICA IDENTITY DEFAULT` (the auto-created table has a primary key) or `FULL`,
+- be writable by the CDC role: `CREATE` on the schema for the first run, then `INSERT` and `UPDATE`.
+
+Set `postgres.heartbeat.table.name: ""` to disable it. Watch `go_pq_cdc_replication_slot_slot_lag` to see whether WAL retention is growing; see [docs/observability.md](docs/observability.md).
+
 ## Docker
 
 Build a release image (nothing is pushed automatically):

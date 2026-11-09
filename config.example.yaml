@@ -8,11 +8,19 @@ postgres:                        # go-pq-cdc config, see its README for every op
   database: app
   logger:
     level: info                  # debug|info|warn|error
+  heartbeat:                     # keeps the slot moving when the database is idle; empty table.name disables
+    table:
+      name: walcast_heartbeat
+      schema: public
+    interval: 5s
   publication:
     name: walcast_pub
     createIfNotExists: true
     operations: [INSERT, UPDATE, DELETE, TRUNCATE]
     tables:
+      - name: walcast_heartbeat # must be in the publication; DEFAULT is enough
+        schema: public
+        replicaIdentity: DEFAULT
       - name: users
         schema: public
         replicaIdentity: FULL    # FULL => updates/deletes carry the complete "before" row
