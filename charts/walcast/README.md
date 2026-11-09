@@ -35,6 +35,17 @@ outside the chart.
 These must match `config.postgres.metric.port` and
 `config.observability.health_port`.
 
+## Heartbeat
+
+The chart enables a dedicated `walcast_heartbeat` table with a 5s interval so
+an idle CDC database does not retain WAL while other databases on the same
+instance are busy. The table is included in `config.postgres.publication.tables`.
+
+The CDC role needs `CREATE` on the schema for the first run, then `INSERT` and
+`UPDATE` on the heartbeat table. If the publication is managed outside walcast,
+include the heartbeat table there as well. Set
+`config.postgres.heartbeat.table.name` to `""` to disable it.
+
 ## Scaling
 
 PostgreSQL logical replication slots allow a single active consumer. Keep

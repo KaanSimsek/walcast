@@ -54,11 +54,21 @@ config:
     database: app
     logger:
       level: info
+    # Empty table.name disables the heartbeat. The table must be writable by
+    # the CDC role and included in publication.tables below.
+    heartbeat:
+      table:
+        name: walcast_heartbeat
+        schema: public
+      interval: 5s
     publication:
       name: walcast_pub
       createIfNotExists: true
       operations: [INSERT, UPDATE, DELETE, TRUNCATE]
-      tables: []
+      tables:
+        - name: walcast_heartbeat
+          schema: public
+          replicaIdentity: DEFAULT
       # - name: users
       #   schema: public
       #   replicaIdentity: FULL
